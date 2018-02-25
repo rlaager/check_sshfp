@@ -4,6 +4,9 @@ the server offers have SSHFP records, and that all SSHFP records are
 correct. Incorrect SSHFP records are considered CRITICAL; missing or
 superfluous ones are considered WARNING.
 
+In case of WARNING or CRITICAL the SSHFP records that are wrong or
+missing are printed to stdout.
+
 Requires Python 3, dnspython, and the ssh-keyscan program. (On Debian,
 that means ``python3-dnspython`` and ``openssh-client``.) Currently
 happens to work under Python 2 also, but this has not been tested as

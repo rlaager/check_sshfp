@@ -47,18 +47,44 @@ SSHFP_FP_ALGS = {
 }
 
 
-def check_sshfp_for_host(hostname):
+def output_sshfp_record(hostname, algorithm, key):
+    # get algorithm number
+    for number, value in SSHFP_KEY_ALGS.items():
+        if value == algorithm:
+            algonum = number
+            break
+    print("%s IN SSHFP %s 2 %s" % (hostname, algonum, hashlib.sha256(base64.b64decode(key)).hexdigest()))
 
-    # First, get the SSHFPs.
-    sshfp_result = dns.resolver.query(hostname, dns.rdatatype.SSHFP, raise_on_no_answer=False)
-    if sshfp_result.rrset is None:
-        print('SSHFP WARNING: No records present.')
-        sys.exit(1)
+def check_sshfp_for_host(hostname):
+    # Get the NS records so we can ask the auth server directly
+    nsanswer = dns.resolver.query(hostname, "NS", raise_on_no_answer=False)
+    if not nsanswer.rrset:
+        # no NS records for this hostname, so find the authority and do an NS lookup for that name instead
+        authority = nsanswer.response.authority[0].name.to_text()
+        nsanswer = dns.resolver.query(authority, "NS", raise_on_no_answer=False)
+        if not nsanswer.rrset:
+            # no NS records found for authority, something is weird
+            print('SSHFP CRITICAL: Unable to find nameservers for authority %s for hostname %s' % (authority, hostname))
+            sys.exit(2)
+
+    # get the v4 ip of the first nameserver in the list
+    nameserver = nsanswer[0].to_text()
+    ipanswer = dns.resolver.query(nameserver)
+    if not ipanswer:
+        # something is wrong, found no A records for this nameserver
+        print('SSHFP CRITICAL: Unable to lookup IP for authoritative nameserver %s' % nameserver)
+        sys.exit(2)
+
+    # ok, get the sshfp records using the auth server
+    authres = dns.resolver.Resolver(configure=False)
+    authres.nameservers = [ipanswer[0].to_text()]
+    sshfp_result = authres.query(hostname, dns.rdatatype.SSHFP, raise_on_no_answer=False)
 
     # Turn them into a more convenient representation.
     sshfps = {}
-    for record in sshfp_result.rrset:
-        sshfps.setdefault(SSHFP_KEY_ALGS[record.algorithm], {'seen': False, 'fingerprints': []})['fingerprints'].append((SSHFP_FP_ALGS[record.fp_type], record.fingerprint))
+    if sshfp_result:
+        for record in sshfp_result.rrset:
+            sshfps.setdefault(SSHFP_KEY_ALGS[record.algorithm], {'seen': False, 'fingerprints': []})['fingerprints'].append((SSHFP_FP_ALGS[record.fp_type], record.fingerprint))
     #print(sshfps)
 
     # ssh-keyscan puts status info on stderr, and there's no option
@@ -77,30 +103,40 @@ def check_sshfp_for_host(hostname):
 
     # Check that each key has at least one SSHFP, and that all of
     # that algorithm's SSHFPs match the key.
+    exitcode = 0
     for line in stdout.decode().splitlines():
         host, algorithm, key = line.strip().split()
         try:
             sshfp = sshfps[algorithm]
         except KeyError:
             print('SSHFP WARNING: No record for algorithm %s offered by server.' % (algorithm,))
-            sys.exit(1)
+            output_sshfp_record(hostname, algorithm, key)
+            if exitcode < 1:
+                exitcode = 1
+            sshfp = None
 
-        sshfp['seen'] = True
-        for hashfunc, correct_fp in sshfp['fingerprints']:
-            observed_fp = hashfunc(base64.b64decode(key.encode()))
-            if observed_fp != correct_fp:
-                print('SSHFP CRITICAL: Fingerprint mismatch: SSHFP %s, observed %s.' % (binascii.hexlify(correct_fp).decode(), binascii.hexlify(observed_fp).decode()))
-                sys.exit(2)
+        if sshfp:
+            sshfp['seen'] = True
+            for hashfunc, dns_fp in sshfp['fingerprints']:
+                # calculate sshfp based on observed public ssh key
+                observed_fp = hashfunc(base64.b64decode(key.encode()))
+                if observed_fp != dns_fp:
+                    print('SSHFP CRITICAL: Fingerprint mismatch: SSHFP %s, observed %s.' % (binascii.hexlify(correct_fp).decode(), binascii.hexlify(observed_fp).decode()))
+                    output_sshfp_record(hostname, algorithm, key)
+                    exitcode = 2
 
     # Check that there are no extra SSHFPs.
     for algorithm, sshfp in sshfps.items():
         if not sshfp['seen']:
-            print('SSHFP WARNING: Record present for algorithm %s not offered by server.' % (algorithm,))
-            sys.exit(1)
+            print('SSHFP WARNING: Record present for algorithm %s not offered by server. Delete this record:' % (algorithm,))
+            output_sshfp_record(hostname, algorithm, key)
+            if exitcode < 1:
+                exitcode = 1
 
-    print('SSHFP OK: %d records for %d algorithms' % (len(sshfp_result.rrset), len(sshfps)))
-    sys.exit(0)
-
+    if not exitcode:
+        # exitcode is 0
+        print('SSHFP OK: %d records for %d algorithms' % (len(sshfp_result.rrset), len(sshfps)))
+    sys.exit(exitcode)
 
 
 if __name__ == '__main__':
@@ -110,3 +146,4 @@ if __name__ == '__main__':
     except Exception:
         sys.stdout.write('SSHFP UNKNOWN: ' + traceback.format_exc())
         sys.exit(3)
+
