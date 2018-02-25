@@ -109,7 +109,7 @@ def check_sshfp_for_host(hostname):
         try:
             sshfp = sshfps[algorithm]
         except KeyError:
-            print('SSHFP WARNING: No record for algorithm %s offered by server.' % (algorithm,))
+            print('SSHFP WARNING: No record for algorithm %s offered by server. Add this record:' % (algorithm,))
             output_sshfp_record(hostname, algorithm, key)
             if exitcode < 1:
                 exitcode = 1
@@ -121,7 +121,7 @@ def check_sshfp_for_host(hostname):
                 # calculate sshfp based on observed public ssh key
                 observed_fp = hashfunc(base64.b64decode(key.encode()))
                 if observed_fp != dns_fp:
-                    print('SSHFP CRITICAL: Fingerprint mismatch: SSHFP %s, observed %s.' % (binascii.hexlify(correct_fp).decode(), binascii.hexlify(observed_fp).decode()))
+                    print('SSHFP CRITICAL: Fingerprint mismatch: SSHFP %s, observed %s. Delete the wrong record and add this instead:' % (binascii.hexlify(correct_fp).decode(), binascii.hexlify(observed_fp).decode()))
                     output_sshfp_record(hostname, algorithm, key)
                     exitcode = 2
 
