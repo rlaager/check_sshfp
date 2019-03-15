@@ -53,7 +53,7 @@ def output_sshfp_record(hostname, algorithm, key):
         if value == algorithm:
             algonum = number
             break
-    print("%s IN SSHFP %s 2 %s" % (hostname, algonum, hashlib.sha256(base64.b64decode(key)).hexdigest()))
+    print("%s. IN SSHFP %s 2 %s" % (hostname, algonum, hashlib.sha256(base64.b64decode(key)).hexdigest()))
 
 def check_sshfp_for_host(hostname):
     # Get the NS records so we can ask the auth server directly
